@@ -1,25 +1,38 @@
 {
   "name": "@codepre/a2aw-ts",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "协议无关的 Agent 能力适配库：A2aImplAdaptor/A2aInvokeAdaptor 完成能力探测与调用，A2aGateway 经可配置的 A2A/ACP/MCP 多协议统一向外暴露，协议细节收拢在内部 binding 层",
+  "license": "Apache-2.0",
+  "author": "liankong <xhsw.new@outlook.com>",
   "type": "module",
-  "description": "协议无关的 Agent 能力适配库：A2aImplAdaptor/A2aInvokeAdaptor 完成能力探测与调用，A2aGateway 经可配置的 A2A/ACP/MCP 多协议统一向外暴露，协议细节收拢在内部 binding 层 (libs/a2aw-ts)",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
     "./package.json": "./package.json"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
-    "node": ">=23.6"
+    "node": ">=20"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
-    "@a2a-js/sdk": "1.0.1",
-    "@agentclientprotocol/sdk": "1.4.0",
+    "@a2a-js/sdk": "^1.0.1",
+    "@agentclientprotocol/sdk": "^1.4.0",
     "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "peerDependencies": {

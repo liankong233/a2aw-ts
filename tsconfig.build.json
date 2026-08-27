@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    // 编译产物输出到 dist，相对导入的 .ts 后缀自动重写为 .js
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["tests"]
+}
