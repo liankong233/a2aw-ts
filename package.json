@@ -16,7 +16,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "README-zh.md"
   ],
   "publishConfig": {
     "access": "public"

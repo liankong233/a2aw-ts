@@ -1,18 +1,22 @@
 # @codepre/a2aw-ts
 
-协议无关的 Agent 能力适配库：通过 **`A2aImplAdaptor`（实现侧）**、**`A2aInvokeAdaptor`（调用侧）** 与 **`A2aGateway`（多协议对外网关）** 完成全部的能力探测、调用与实现。使用者不接触任何 Agent 协议（A2A / ACP / MCP）的细节，公共面也不出现任何协议 SDK 的类型；新增协议时只需在内部 binding 层加一个同形模块，公共接口不变。
+**Agent-to-Agent wrapper library for TypeScript**
 
-## 三个适配器
+Protocol-agnostic Agent capability adaptation library: **`A2aImplAdaptor` (implementation side)**, **`A2aInvokeAdaptor` (invocation side)** and **`A2aGateway` (multi-protocol outbound gateway)** together cover all capability discovery, invocation and exposure. Consumers never touch the details of any Agent protocol (A2A / ACP / MCP), and no protocol SDK types ever appear on the public surface; adding a new protocol only requires a same-shaped module in the internal binding layer — the public API stays unchanged.
 
-| 适配器 | 方向 | 职责 |
+**[中文文档 (Chinese docs)](./README-zh.md)**
+
+## The three adaptors
+
+| Adaptor | Direction | Responsibility |
 | --- | --- | --- |
-| `A2aImplAdaptor` | 外部 → 内部 | 把内部执行能力导出为可被发现与调用的服务端：能力声明 → 对外卡片、执行器 → 任务事件流、认证校验 → 请求主体；`mount()` 挂载 HTTP 服务、`probe()` 本地能力视图 |
-| `A2aInvokeAdaptor` | 内部 → 外部 | 连接外部 Agent：`probe()` 探测能力（→ 统一能力视图）、`invoke()` 调起任务并等到终态、`invokeStream()` 订阅事件流、`getTask()` / `cancel()` 管理任务 |
-| `A2aGateway` | 外部 → 内部 | **统一对外网关**：同一份能力实现经可配置的多协议传输同时暴露——A2A（卡片发现 + 任务调用）/ ACP（会话式提示驱动）/ MCP（技能 → 工具），共享执行器与凭据校验器 |
+| `A2aImplAdaptor` | external → internal | Exposes internal execution capabilities as a discoverable, callable server: capability declaration → outbound card, executor → task event stream, credential verification → request principal; `mount()` attaches HTTP handlers, `probe()` returns the local capability view |
+| `A2aInvokeAdaptor` | internal → external | Connects to remote Agents: `probe()` discovers capabilities (→ unified capability view), `invoke()` starts a task and waits for a terminal state, `invokeStream()` subscribes to event streams, `getTask()` / `cancel()` manage tasks |
+| `A2aGateway` | external → internal | **Unified outbound gateway**: one capability implementation exposed simultaneously over configurable multi-protocol transports — A2A (card discovery + task invocation) / ACP (session-style prompt-driven) / MCP (skills → tools) — sharing the executor and credential verifier |
 
-## 快速开始
+## Quick start
 
-### 实现侧：导出内部能力
+### Implementation side: expose internal capabilities
 
 ```ts
 import express from 'express';
@@ -21,14 +25,14 @@ import { A2aImplAdaptor, extractBearerToken } from '@codepre/a2aw-ts';
 const impl = new A2aImplAdaptor({
   capabilities: {
     name: 'codepre',
-    description: 'Codepre 导出的远程 Agent',
+    description: 'Remote Agent exported by Codepre',
     version: '1.0.0',
-    skills: [{ name: 'run-task', description: '执行 Codepre 任务' }],
+    skills: [{ name: 'run-task', description: 'Run Codepre tasks' }],
     capabilities: { streaming: true },
     auth: [{ key: 'bearer', kind: 'http', name: 'bearer' }],
   },
   implement: async ({ taskId, message, user }, emit) => {
-    emit.text(`已收到：${message.parts[0]?.text ?? ''}（${user?.userName ?? '匿名'}）`);
+    emit.text(`Received: ${message.parts[0]?.text ?? ''} (${user?.userName ?? 'anonymous'})`);
     emit.status(taskId, 'completed');
   },
   auth: { verify: (headers) =>
@@ -39,7 +43,7 @@ const app = express();
 impl.mount(app); // /.well-known/agent-card.json + /jsonrpc + /api/rest
 ```
 
-### 统一对外网关：一份实现，多协议暴露
+### Unified gateway: one implementation, multiple protocols
 
 ```ts
 import express from 'express';
@@ -48,28 +52,29 @@ import { A2aGateway, extractBearerToken } from '@codepre/a2aw-ts';
 const gateway = new A2aGateway({
   capabilities: {
     name: 'codepre',
-    description: 'Codepre 导出的远程 Agent',
-    skills: [{ name: 'run-task', description: '执行 Codepre 任务' }],
+    description: 'Remote Agent exported by Codepre',
+    skills: [{ name: 'run-task', description: 'Run Codepre tasks' }],
   },
   implement: async ({ taskId, message }, emit) => {
-    emit.text(`已收到：${message.parts[0]?.text ?? ''}`);
+    emit.text(`Received: ${message.parts[0]?.text ?? ''}`);
     emit.status(taskId, 'completed');
   },
   auth: { verify: (headers) =>
     extractBearerToken(headers) ? { userName: 'codepre' } : null },
-  // transports 缺省三协议全开；显式给出时只启用列出的传输（白名单）
+  // Omitting transports enables all three protocols; when given explicitly,
+  // only the listed transports are enabled (whitelist semantics)
   transports: {
     a2a: true,                       // /.well-known/agent-card.json + /jsonrpc + /api/rest
-    acp: { path: '/acp' },           // 会话式：session/prompt 驱动执行器，chunk 流式回推
-    mcp: { path: '/mcp' },           // 工具式：技能 → tools/list + tools/call
+    acp: { path: '/acp' },           // session style: session/prompt drives the executor, chunks stream back
+    mcp: { path: '/mcp' },           // tool style: skills → tools/list + tools/call
   },
 });
 gateway.mount(app);
 ```
 
-各协议的门禁语义略有差异：A2A 未携带凭据的请求放行到协议层（主体未知）；ACP 同样放行未携带凭据的请求，但携带无效凭据一律 401；MCP 配置了 `verify` 后所有请求都要求有效凭据。注意：各绑定自行读取原始请求体，宿主不要在其之前全局挂 `express.json()`。
+Gate semantics differ slightly per protocol: A2A lets requests without credentials through to the protocol layer (principal unknown); ACP also admits requests without credentials, but any invalid credentials are rejected with 401; MCP requires valid credentials on every request once `verify` is configured. Note: each binding reads the raw request body itself, so the host must not attach a global `express.json()` middleware before them.
 
-### 调用侧：探测并调用外部 Agent
+### Invocation side: probe and call remote Agents
 
 ```ts
 import {
@@ -80,52 +85,56 @@ import {
 } from '@codepre/a2aw-ts';
 
 const invoke = new A2aInvokeAdaptor('https://agent.example', {
-  fetch: networkClient.fetch,                    // 自定义 fetch 替换（可选）
-  auth: bearerTokenProvider(readSecretRefToken), // 凭据来源（可选）
+  fetch: networkClient.fetch,                    // custom fetch replacement (optional)
+  auth: bearerTokenProvider(readSecretRefToken), // credential source (optional)
 });
-const view = await invoke.probe();               // 统一能力视图：技能/开关/认证要求/传输绑定
-const task = await invoke.invoke({ message: textMessage('你好') }); // 等到终态
+const view = await invoke.probe();               // unified capability view: skills / switches / auth requirements / transport bindings
+const task = await invoke.invoke({ message: textMessage('hello') }); // waits for a terminal state
 console.log(task.state, messageText(task.message));
 ```
 
-## 统一数据模型（全部协议无关）
+## Unified data model (all protocol-agnostic)
 
-- `CapabilityDeclaration`：本地能力声明（名称/描述/技能/能力开关/认证方案），`A2aImplAdaptor` 的输入；
-- `CapabilityView`：远端探测视图（含 `auth.required` / `auth.schemes` 与传输绑定），`probe()` 的产出；
-- `AgentMessage`：消息（`role: 'user' | 'agent'` + parts；当前支持文本 part，扩展点见 `AgentMessagePart`）；`textMessage()` / `messageText()` 便捷助手；
-- `AgentTask` / `AgentTaskState`：任务快照与状态机（终态 = completed / failed / canceled / rejected）；
-- `AgentTaskEvent`：任务事件流（task / status / message / artifact）。
+- `CapabilityDeclaration`: local capability declaration (name/description/skills/capability switches/auth schemes), the input of `A2aImplAdaptor`;
+- `CapabilityView`: remote discovery view (with `auth.required` / `auth.schemes` and transport bindings), the output of `probe()`;
+- `AgentMessage`: message (`role: 'user' | 'agent'` + parts; text parts are currently supported, see `AgentMessagePart` for extension points); `textMessage()` / `messageText()` conveniences;
+- `AgentTask` / `AgentTaskState`: task snapshot and state machine (terminal states = completed / failed / canceled / rejected);
+- `AgentTaskEvent`: task event stream (task / status / message / artifact).
 
-## 错误模型
+## Error model
 
-| 错误 | 场景 | code |
+| Error | Scenario | codes |
 | --- | --- | --- |
-| `AuthError` | 授权路径（凭据缺失/无效/不可得/需要挑战） | `unauthorized` / `forbidden` / `credentials-unavailable` / `challenge` |
-| `AgentInvokeError` | 调用路径 | `timeout` / `task-failed` / `task-not-found` / `invalid-request` / `unexpected` |
+| `AuthError` | authorization path (credentials missing/invalid/unavailable/challenge required) | `unauthorized` / `forbidden` / `credentials-unavailable` / `challenge` |
+| `AgentInvokeError` | invocation path | `timeout` / `task-failed` / `task-not-found` / `invalid-request` / `unexpected` |
 
-`invoke()` 在任务终态为 failed / rejected 时抛 `AgentInvokeError('task-failed')` 并携带最终任务快照（`error.task`）；等待终态超时抛 `timeout`。
+`invoke()` throws `AgentInvokeError('task-failed')` with the final task snapshot attached (`error.task`) when the terminal state is failed / rejected; a timeout while waiting for a terminal state throws `timeout`.
 
-## 目录
+## Layout
 
 ```
 src/
-  model/     协议无关数据模型（message / task / capability / types）
-  impl/      A2aImplAdaptor（实现侧适配器）
-  invoke/    A2aInvokeAdaptor + AgentInvokeError（调用侧适配器）
-  gateway/   A2aGateway（多协议对外网关）
-  common/    认证头提供器（auth.ts）、fetch 注入（fetch.ts）、授权错误（errors.ts）
-  binding/   协议绑定层（不导出）
-    a2a/       A2A 传输、AgentCard、任务状态机、模型↔SDK 转换（model.ts）
-    acp/       ACP 授权门禁 + 网关绑定（gateway.ts：能力模型 → AgentApp）
-    mcp/       网关绑定（server.ts：官方 @modelcontextprotocol/sdk 的无状态 Streamable HTTP）
-tests/     vitest 测试（真实 node:http / Express 链路；公共面测试不 import 任何协议 SDK）
+  model/     protocol-agnostic data model (message / task / capability / types)
+  impl/      A2aImplAdaptor (implementation-side adaptor)
+  invoke/    A2aInvokeAdaptor + AgentInvokeError (invocation-side adaptor)
+  gateway/   A2aGateway (multi-protocol outbound gateway)
+  common/    auth header providers (auth.ts), fetch injection (fetch.ts), auth errors (errors.ts)
+  binding/   protocol binding layer (not exported)
+    a2a/       A2A transport, AgentCard, task state machine, model↔SDK conversion (model.ts)
+    acp/       ACP authorization gate + gateway binding (gateway.ts: capability model → AgentApp)
+    mcp/       gateway binding (server.ts: stateless Streamable HTTP on the official @modelcontextprotocol/sdk)
+tests/     vitest tests (real node:http / Express pipelines; public-surface tests import no protocol SDKs)
 ```
 
-分层铁律：`model/` 与三个适配器不依赖任何协议 SDK；只有 `binding/` 依赖 `@a2a-js/sdk` / `@agentclientprotocol/sdk` / `@modelcontextprotocol/sdk`（Express 为可选 peer）。**新增协议 = 新增一个 binding 模块 + 网关传输配置扩展一项**，公共接口不变。
+Layering rule: `model/` and the three adaptors depend on no protocol SDK; only `binding/` depends on `@a2a-js/sdk` / `@agentclientprotocol/sdk` / `@modelcontextprotocol/sdk` (Express is an optional peer). **Adding a protocol = adding one binding module + one entry in the gateway transport config**, public API unchanged.
 
-## 门禁
+## Gates
 
 ```bash
 npm run typecheck   # tsc --noEmit
 npm test            # vitest run
 ```
+
+## License
+
+[Apache-2.0](./LICENSE)
