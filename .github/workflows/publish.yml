@@ -8,7 +8,7 @@ on:
 
 permissions:
   contents: read
-  # GitHub OIDC：供 npm publish --provenance 换取 SLSA 签名（包来源可验证）
+  # GitHub OIDC：npm Trusted Publishers 认证 + provenance 签名均依赖它
   id-token: write
 
 jobs:
@@ -21,7 +21,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          # setup-node 据此生成 ~/.npmrc（registry 指向 + 认证凭据注入）
+          # 指向 npmjs registry；认证经 npm Trusted Publishers 的 GitHub OIDC
+          # 自动完成（npm CLI 探测到 OIDC 环境即优先使用，无需长期 token）
           registry-url: https://registry.npmjs.org/
           cache: npm
 
@@ -39,7 +40,10 @@ jobs:
       - name: Build (dist)
         run: npm run build
 
-      - name: Publish to npm (SLSA provenance via GitHub OIDC)
-        run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted Publishers：npm CLI 用 GitHub OIDC 认证 publish，
+      # provenance attestation 默认自动生成（无需 --provenance flag）。
+      # 前置（npmjs.com 包设置页 Trusted Publisher）：workflow 填 publish.yml、
+      # organization 填 liankong233、repository 填 a2aw-ts、actions 勾 npm publish；
+      # package.json 的 repository.url 已与 GitHub 仓库匹配（https://github.com/liankong233/a2aw-ts.git）
+      - name: Publish to npm
+        run: npm publish
