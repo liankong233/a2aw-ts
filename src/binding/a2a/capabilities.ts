@@ -180,6 +180,8 @@ export interface A2aProbeResult {
   readonly skills: readonly A2aSkillDeclaration[];
   readonly capabilities: Required<A2aCapabilityDeclarationFlags>;
   readonly authentication: A2aProbeAuthentication;
+  /** AgentCard 是否携带 JWS 签名（存在时登记流程应校验）。 */
+  readonly signaturePresent: boolean;
   readonly interfaces: readonly A2aProbeBinding[];
   /** 原始 AgentCard（需要签名校验/完整结构时使用）。 */
   readonly card: AgentCard;
@@ -211,6 +213,7 @@ export function fromAgentCard(card: AgentCard, url: string): A2aProbeResult {
         kind: securitySchemeKind(scheme),
       })),
     },
+    signaturePresent: (card.signatures?.length ?? 0) > 0,
     interfaces: (card.supportedInterfaces ?? []).map((agentInterface) => ({
       protocolBinding: agentInterface.protocolBinding,
       protocolVersion: agentInterface.protocolVersion,

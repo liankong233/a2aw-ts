@@ -131,6 +131,8 @@ export function toSdkTaskState(state: AgentTaskState): TaskState {
       return TaskState.TASK_STATE_WORKING;
     case 'input-required':
       return TaskState.TASK_STATE_INPUT_REQUIRED;
+    case 'auth-required':
+      return TaskState.TASK_STATE_AUTH_REQUIRED;
     case 'completed':
       return TaskState.TASK_STATE_COMPLETED;
     case 'failed':
@@ -152,8 +154,9 @@ export function fromSdkTaskState(state: TaskState): AgentTaskState {
     case TaskState.TASK_STATE_WORKING:
       return 'working';
     case TaskState.TASK_STATE_INPUT_REQUIRED:
-    case TaskState.TASK_STATE_AUTH_REQUIRED:
       return 'input-required';
+    case TaskState.TASK_STATE_AUTH_REQUIRED:
+      return 'auth-required';
     case TaskState.TASK_STATE_COMPLETED:
       return 'completed';
     case TaskState.TASK_STATE_FAILED:
@@ -182,10 +185,13 @@ export function fromSdkArtifact(artifact: Artifact): AgentArtifact {
   };
 }
 
-/** SDK Task → 模型任务快照。 */
+/** SDK Task → 模型任务快照（携带远端分配的 contextId，续聊锚点）。 */
 export function fromSdkTask(task: Task): AgentTask {
   return {
     taskId: task.id,
+    ...(task.contextId !== undefined && task.contextId !== ''
+      ? { contextId: task.contextId }
+      : {}),
     state:
       task.status?.state !== undefined ? fromSdkTaskState(task.status.state) : 'unknown',
     ...(task.status?.message !== undefined
@@ -201,7 +207,7 @@ export function fromSdkTask(task: Task): AgentTask {
 export function toSdkTask(task: AgentTask, contextId: string): Task {
   return {
     id: task.taskId,
-    contextId,
+    contextId: task.contextId ?? contextId,
     status: {
       state: toSdkTaskState(task.state),
       message:
@@ -455,6 +461,7 @@ export function fromCardView(view: A2aProbeResult): CapabilityView {
         kind: requirement.kind,
       })),
     },
+    signature: { present: view.signaturePresent },
     bindings: view.interfaces.map((agentInterface) => ({
       protocol: agentInterface.protocolBinding,
       version: agentInterface.protocolVersion,

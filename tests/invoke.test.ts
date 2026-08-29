@@ -54,7 +54,7 @@ function sendMessageResult(task?: unknown, message?: unknown): unknown {
 }
 
 /** wire 枚举名助手：`completed` → `TASK_STATE_COMPLETED`。 */
-function wireState(state: 'SUBMITTED' | 'WORKING' | 'COMPLETED' | 'FAILED' | 'CANCELED' | 'REJECTED'): string {
+function wireState(state: 'SUBMITTED' | 'WORKING' | 'COMPLETED' | 'FAILED' | 'CANCELED' | 'REJECTED' | 'INPUT_REQUIRED'): string {
   return `TASK_STATE_${state}`;
 }
 
@@ -257,6 +257,26 @@ describe('A2aInvokeAdaptor.invoke（发送 → 终态）', () => {
     expect(error).toBeInstanceOf(AgentInvokeError);
     expect((error as AgentInvokeError).code).toBe('task-failed');
     expect(((error as AgentInvokeError).task?.message) !== undefined).toBe(true);
+  });
+
+  it('input-required：立即返回非终态快照供续聊，不进入轮询', async () => {
+    let polls = 0;
+    const mock = await startMockServer({
+      sendMessage: () =>
+        sendMessageResult(taskResult('t-1', wireState('INPUT_REQUIRED'), agentReply('请补充目标文件名'))),
+      // 若实现错误地继续轮询，这里会拿到 GET 命中
+      getTask: () => {
+        polls += 1;
+        return taskResult('t-1', wireState('COMPLETED'), agentReply('不应到达'));
+      },
+    });
+    servers.push(mock.close);
+
+    const adaptor = new A2aInvokeAdaptor(mock.url, { timeoutMs: 1000 });
+    const task = await adaptor.invoke({ message: textMessage('整理文件') });
+    expect(task.state).toBe('input-required');
+    expect(messageText(task.message!)).toBe('请补充目标文件名');
+    expect(polls).toBe(0);
   });
 });
 

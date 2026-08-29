@@ -89,10 +89,16 @@ export function createMcpGatewayBinding(options: {
 }): RequestHandler {
   const jsonParser = express.json();
 
-  return async (req, res, next) => {
+  return async (req, res, _next) => {
     let principal: { userName: string } | undefined;
     if (options.verify !== undefined) {
-      const verified = await options.verify(incomingHeadersToRecord(req.headers));
+      let verified: { userName: string } | null | undefined;
+      try {
+        verified = await options.verify(incomingHeadersToRecord(req.headers));
+      } catch {
+        // 校验器自身抛错（凭据后端故障等）按无法确认身份处理：fail-closed
+        verified = null;
+      }
       if (verified === null || verified === undefined) {
         res.writeHead(401, { 'www-authenticate': 'Bearer' });
         res.end();
@@ -129,7 +135,20 @@ export function createMcpGatewayBinding(options: {
         }
         await transport.handleRequest(req, res, req.body);
       } catch {
-        next();
+        // 协议处理异常不能静默 fallthrough（宿主会回 404 且零日志）：
+        // 回标准 JSON-RPC internal error；流已开始时收束响应
+        if (!res.headersSent) {
+          res.writeHead(500, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: null,
+              error: { code: -32603, message: 'Internal error' },
+            }),
+          );
+        } else {
+          res.end();
+        }
       }
     });
   };

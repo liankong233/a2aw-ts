@@ -33,6 +33,8 @@ export type AgentTaskState =
   | 'submitted'
   | 'working'
   | 'input-required'
+  /** 服务端要求先补凭据（与澄清相区别；§4.14 挂起等待凭据流程）。 */
+  | 'auth-required'
   | 'completed'
   | 'failed'
   | 'canceled'
@@ -59,6 +61,8 @@ export interface AgentArtifact {
 /** 协议无关的任务快照。 */
 export interface AgentTask {
   readonly taskId: string;
+  /** 会话上下文 id（多轮分组；首轮或直答可能缺省）。 */
+  readonly contextId?: string;
   readonly state: AgentTaskState;
   /** 终态回复（协议里 status.message 的投影）。 */
   readonly message?: AgentMessage;

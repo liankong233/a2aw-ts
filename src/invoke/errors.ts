@@ -29,6 +29,8 @@ import type { AgentTask } from '../model/task.ts';
 export type AgentInvokeErrorCode =
   /** 等待任务终态超时。 */
   | 'timeout'
+  /** 调用被调用方取消（AbortSignal 中止）。 */
+  | 'canceled'
   /** 任务最终状态为 failed / rejected。 */
   | 'task-failed'
   /** 任务不存在（协议 404 / task not found 语义）。 */

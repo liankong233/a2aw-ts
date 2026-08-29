@@ -221,9 +221,12 @@ export class A2aImplAdaptor {
           taskId: input.taskId,
           contextId: input.contextId,
           message: fromSdkMessage(input.message),
+          // 仅认证通过的主体才投影给执行器：a2a-js 对无凭据请求给出的是
+          // isAuthenticated=false 的占位用户（userName 恒为空串），若原样
+          // 透传会让 `if (!input.user)` 形式的门禁在 A2A 上失效
           user:
-            input.user !== undefined
-              ? { userName: input.user.userName }
+            input.user !== undefined && input.user.isAuthenticated === true
+              ? { userName: input.user.userName ?? '' }
               : undefined,
           task: input.task !== undefined ? fromSdkTask(input.task) : undefined,
         },

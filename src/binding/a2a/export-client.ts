@@ -48,6 +48,9 @@ import { buildAgentTextMessage } from './messages.ts';
 import { fromAgentCard, toAgentCard, type A2aCapabilityDeclaration } from './capabilities.ts';
 import { createA2aUserBuilder, type A2aCredentialVerifier, type MaybePromise } from './auth.ts';
 
+/** 任务上下文登记上限：防止已终结且未取消的任务记录无限累积。 */
+const MAX_TASK_CONTEXT_IDS = 1024;
+
 /** {@link A2aExportClient} 的选项。 */
 export type A2aExportOptions = {
   /** 统一能力声明：导出 AgentCard 的来源（含 skills / 认证方案）。 */
@@ -168,6 +171,10 @@ export class A2aExportClient {
   readonly capabilities: A2aCapabilityDeclaration;
   private readonly exportOptions: A2aExportOptions;
   private readonly requestHandler: A2ARequestHandler;
+  /**
+   * 任务 id → contextId（取消时发布 canceled 事件需要 contextId）。
+   * 取消后即删；并设上限防止已终结任务的记录无限累积。
+   */
   private readonly taskContextIds = new Map<string, string>();
 
   constructor(options: A2aExportOptions) {
@@ -181,6 +188,13 @@ export class A2aExportClient {
     const taskStore = options.taskStore ?? new InMemoryTaskStore();
     const executor: AgentExecutor = {
       execute: async (requestContext: RequestContext, eventBus: ExecutionEventBus) => {
+        // 有界登记：超上限时淘汰最旧条目（已终结且未取消的任务不再需要）
+        if (this.taskContextIds.size >= MAX_TASK_CONTEXT_IDS) {
+          const oldest = this.taskContextIds.keys().next().value;
+          if (oldest !== undefined) {
+            this.taskContextIds.delete(oldest);
+          }
+        }
         this.taskContextIds.set(requestContext.taskId, requestContext.contextId);
         const input: A2aAgentTaskInput = {
           taskId: requestContext.taskId,
@@ -196,18 +210,23 @@ export class A2aExportClient {
         );
       },
       cancelTask: async (taskId: string, eventBus: ExecutionEventBus) => {
-        await options.onCancel?.(taskId);
-        const contextId = this.taskContextIds.get(taskId) ?? '';
-        const adapter = new A2aEventAdapter(eventBus, taskId, contextId);
-        adapter.status(taskId, TaskState.TASK_STATE_CANCELED);
-        adapter.task({
-          id: taskId,
-          contextId,
-          status: { state: TaskState.TASK_STATE_CANCELED, message: undefined, timestamp: undefined },
-          artifacts: [],
-          history: [],
-          metadata: {},
-        });
+        try {
+          await options.onCancel?.(taskId);
+          const contextId = this.taskContextIds.get(taskId) ?? '';
+          const adapter = new A2aEventAdapter(eventBus, taskId, contextId);
+          adapter.status(taskId, TaskState.TASK_STATE_CANCELED);
+          adapter.task({
+            id: taskId,
+            contextId,
+            status: { state: TaskState.TASK_STATE_CANCELED, message: undefined, timestamp: undefined },
+            artifacts: [],
+            history: [],
+            metadata: {},
+          });
+        } finally {
+          // 取消流程完成后登记即可清理（幂等取消重复清理无害）
+          this.taskContextIds.delete(taskId);
+        }
       },
     };
     return new DefaultRequestHandler(agentCard, taskStore, executor);

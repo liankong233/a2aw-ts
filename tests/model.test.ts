@@ -69,14 +69,25 @@ describe('消息转换（模型 ↔ SDK）', () => {
 });
 
 describe('任务状态转换', () => {
-  it('模型状态 ↔ SDK TaskState 往返', () => {
-    for (const state of ['submitted', 'working', 'input-required', 'completed', 'failed', 'canceled', 'rejected', 'unknown'] as const) {
+  it('模型状态 ↔ SDK TaskState 往返（含 auth-required 独立映射）', () => {
+    for (const state of [
+      'submitted',
+      'working',
+      'input-required',
+      'auth-required',
+      'completed',
+      'failed',
+      'canceled',
+      'rejected',
+      'unknown',
+    ] as const) {
       expect(fromSdkTaskState(toSdkTaskState(state))).toBe(state);
     }
   });
 
-  it('AUTH_REQUIRED 投影为 input-required；未识别归 unknown', () => {
-    expect(fromSdkTaskState(TaskState.TASK_STATE_AUTH_REQUIRED)).toBe('input-required');
+  it('AUTH_REQUIRED 独立映射为 auth-required；未识别归 unknown', () => {
+    expect(fromSdkTaskState(TaskState.TASK_STATE_AUTH_REQUIRED)).toBe('auth-required');
+    expect(fromSdkTaskState(TaskState.TASK_STATE_INPUT_REQUIRED)).toBe('input-required');
     expect(fromSdkTaskState(TaskState.UNRECOGNIZED)).toBe('unknown');
     expect(toSdkTaskState('unknown')).toBe(TaskState.TASK_STATE_UNSPECIFIED);
   });

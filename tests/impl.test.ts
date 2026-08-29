@@ -139,6 +139,29 @@ describe('A2aImplAdaptor ↔ A2aInvokeAdaptor（对称端到端）', () => {
     expect(seenUsers).toEqual([{ userName: 'alice' }]);
   });
 
+  it('未携带凭据的 A2A 请求：执行器看到 user 为 undefined（而非占位用户）', async () => {
+    const seenUsers: Array<{ userName?: string } | undefined> = [];
+    const host = await startHost();
+    servers.push(host.close);
+
+    const impl = new A2aImplAdaptor({
+      capabilities: { name: 'secure', description: '需认证的 Agent' },
+      implement: async (input, emit) => {
+        seenUsers.push(input.user);
+        emit.text('ok');
+        emit.status(input.taskId, 'completed');
+      },
+      // A2A 门禁语义：无凭据放行到协议层，但主体必须是 undefined
+      auth: { verify: () => null },
+      exportUrl: `http://127.0.0.1:${host.port}/jsonrpc`,
+    });
+    impl.mount(host.app);
+
+    const connect = new A2aInvokeAdaptor(`http://127.0.0.1:${host.port}`);
+    await connect.invoke({ message: textMessage('hi') });
+    expect(seenUsers).toEqual([undefined]);
+  });
+
   it('执行器抛错：调用侧得到 task-failed', async () => {
     const host = await startHost();
     servers.push(host.close);

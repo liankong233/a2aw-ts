@@ -75,6 +75,7 @@ export {
   type AgentAuthScheme,
   type AgentAuthSchemeKind,
   type AgentCapabilityFlags,
+  type AgentCardKeyRetriever,
   type AgentSkill,
   type CapabilityBinding,
   type CapabilityDeclaration,

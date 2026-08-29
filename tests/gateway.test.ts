@@ -290,6 +290,32 @@ describe('A2aGateway 凭据门禁', () => {
     expect(response.status).toBe(401);
   });
 
+  it('verify 抛错按无法确认身份处理（fail-closed）：MCP/ACP 均 401 且进程不崩', async () => {
+    const host = await startHost(
+      () => new A2aGateway(gatewayOptions({
+        auth: { verify: async () => { throw new Error('凭据后端不可用'); } },
+      })),
+    );
+    servers.push(host.close);
+
+    const mcp = await fetch(`${host.baseUrl}${GATEWAY_DEFAULT_PATHS.mcp}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${GOOD}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    expect(mcp.status).toBe(401);
+
+    const acp = await fetch(`${host.baseUrl}${GATEWAY_DEFAULT_PATHS.acp}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${GOOD}` },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'initialize',
+        params: { protocolVersion: 1, clientCapabilities: {} },
+      }),
+    });
+    expect(acp.status).toBe(401);
+  });
+
   it('A2A：正确凭据下执行器看到主体（复用实现侧链路）', async () => {
     const seenUsers: Array<string | undefined> = [];
     const host = await startHost((baseUrl) => new A2aGateway(gatewayOptions({

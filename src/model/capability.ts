@@ -27,6 +27,8 @@
  * @packageDocumentation
  */
 
+import type { webcrypto } from 'node:crypto';
+
 /** 能力开关（streaming / pushNotifications 投影）。 */
 export interface AgentCapabilityFlags {
   readonly streaming?: boolean;
@@ -90,6 +92,19 @@ export interface CapabilityBinding {
   readonly tenant: string;
 }
 
+/** 可能直接返回值的异步函数。 */
+type MaybePromise<T> = T | Promise<T>;
+
+/**
+ * AgentCard 签名公钥获取器：按 `kid`（必要时 `jku`）取回验证签名所需的
+ * 公钥（WebCrypto `CryptoKey` 或 `JsonWebKey`）。返回 `null`/undefined
+ * 表示拿不到公钥（探测视为校验失败）。
+ */
+export type AgentCardKeyRetriever = (
+  kid: string,
+  jku?: string,
+) => MaybePromise<webcrypto.CryptoKey | webcrypto.JsonWebKey | null | undefined>;
+
 /** 远端能力探测视图（{@link A2aInvokeAdaptor.probe} 的产出）。 */
 export interface CapabilityView {
   /** 探测地址。 */
@@ -102,6 +117,11 @@ export interface CapabilityView {
   readonly auth: {
     readonly required: boolean;
     readonly schemes: readonly AgentAuthScheme[];
+  };
+  /** AgentCard 签名（JWS）状态：存在时登记流程应经校验器确认。 */
+  readonly signature: {
+    /** 卡片是否携带签名（§4.14：存在时强制校验）。 */
+    readonly present: boolean;
   };
   readonly bindings: readonly CapabilityBinding[];
 }
@@ -125,6 +145,7 @@ export function toCapabilityView(
       required: (declaration.auth?.length ?? 0) > 0,
       schemes: declaration.auth ?? [],
     },
+    signature: { present: false },
     bindings: [
       {
         protocol: 'JSONRPC',

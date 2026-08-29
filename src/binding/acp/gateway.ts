@@ -119,8 +119,16 @@ class PrincipalAwareAcpServer extends AcpServer {
       // 未携带凭据：放行到协议层（ACP 规范语义），主体未知
       return super.handleRequest(request, handlerOptions);
     }
-    const principal = await this.verify(headersToRecord(request.headers));
-    if (principal === null || principal === undefined) {
+    let principal: { userName: string } | undefined;
+    try {
+      const verified = await this.verify(headersToRecord(request.headers));
+      if (verified === null || verified === undefined) {
+        return unauthorizedResponse();
+      }
+      principal = verified;
+    } catch {
+      // 校验器自身抛错（凭据后端故障等）按无法确认身份处理：fail-closed；
+      // 交由 ACP node 处理器透传会把错误明文回给客户端，这里自行拦截
       return unauthorizedResponse();
     }
     return principalStorage.run({ userName: principal.userName }, () =>
@@ -131,7 +139,6 @@ class PrincipalAwareAcpServer extends AcpServer {
 
 /** 把能力模型装配为 ACP Agent 应用。 */
 function buildAgentApp(capabilities: CapabilityDeclaration, implement: ImplExecutor): AgentApp {
-  const sessions = new Set<string>();
   const authMethods =
     capabilities.auth !== undefined && capabilities.auth.length > 0
       ? [{ id: 'bearer', name: 'Bearer Token' }]
@@ -144,11 +151,11 @@ function buildAgentApp(capabilities: CapabilityDeclaration, implement: ImplExecu
       authMethods,
     }))
     .onRequest(methods.agent.authenticate, async () => ({}))
-    .onRequest(methods.agent.session.new, async () => {
-      const sessionId = crypto.randomUUID();
-      sessions.add(sessionId);
-      return { sessionId };
-    })
+    // 会话不持久化、不校验：session/new 仅分配 id，session/load 一律
+    // 返回未加载（执行器本身无会话状态，prompt 每轮独立）
+    .onRequest(methods.agent.session.new, async () => ({
+      sessionId: crypto.randomUUID(),
+    }))
     .onRequest(methods.agent.session.load, async () => undefined)
     .onRequest(methods.agent.session.prompt, async (ctx) => {
       const sessionId = ctx.params.sessionId;

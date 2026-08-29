@@ -11,7 +11,7 @@ Protocol-agnostic Agent capability adaptation library: **`A2aImplAdaptor` (imple
 | Adaptor | Direction | Responsibility |
 | --- | --- | --- |
 | `A2aImplAdaptor` | external → internal | Exposes internal execution capabilities as a discoverable, callable server: capability declaration → outbound card, executor → task event stream, credential verification → request principal; `mount()` attaches HTTP handlers, `probe()` returns the local capability view |
-| `A2aInvokeAdaptor` | internal → external | Connects to remote Agents: `probe()` discovers capabilities (→ unified capability view), `invoke()` starts a task and waits for a terminal state, `invokeStream()` subscribes to event streams, `getTask()` / `cancel()` manage tasks |
+| `A2aInvokeAdaptor` | internal → external | Connects to remote Agents: `probe()` discovers capabilities (→ unified capability view), `invoke()` starts a task and waits for a terminal state (or an `input-required` pause, resume via `taskId`), `invokeStream()` subscribes to event streams, `getTask()` / `cancel()` manage tasks |
 | `A2aGateway` | external → internal | **Unified outbound gateway**: one capability implementation exposed simultaneously over configurable multi-protocol transports — A2A (card discovery + task invocation) / ACP (session-style prompt-driven) / MCP (skills → tools) — sharing the executor and credential verifier |
 
 ## Quick start
@@ -89,7 +89,7 @@ const invoke = new A2aInvokeAdaptor('https://agent.example', {
   auth: bearerTokenProvider(readSecretRefToken), // credential source (optional)
 });
 const view = await invoke.probe();               // unified capability view: skills / switches / auth requirements / transport bindings
-const task = await invoke.invoke({ message: textMessage('hello') }); // waits for a terminal state
+const task = await invoke.invoke({ message: textMessage('hello') }); // waits for a terminal state or an input-required pause
 console.log(task.state, messageText(task.message));
 ```
 
@@ -105,10 +105,16 @@ console.log(task.state, messageText(task.message));
 
 | Error | Scenario | codes |
 | --- | --- | --- |
-| `AuthError` | authorization path (credentials missing/invalid/unavailable/challenge required) | `unauthorized` / `forbidden` / `credentials-unavailable` / `challenge` |
-| `AgentInvokeError` | invocation path | `timeout` / `task-failed` / `task-not-found` / `invalid-request` / `unexpected` |
+| `AuthError` | auth error classification helper (HTTP gate failures surface as 401 and do not throw this type; use it to normalize auth semantics in your own call chains) | `unauthorized` / `forbidden` / `credentials-unavailable` / `challenge` |
+| `AgentInvokeError` | invocation path | `timeout` / `canceled` / `task-failed` / `task-not-found` / `invalid-request` / `unexpected` |
 
-`invoke()` throws `AgentInvokeError('task-failed')` with the final task snapshot attached (`error.task`) when the terminal state is failed / rejected; a timeout while waiting for a terminal state throws `timeout`.
+`invoke()` throws `AgentInvokeError('task-failed')` with the final task snapshot attached (`error.task`) when the terminal state is failed / rejected; a timeout while waiting for a terminal state throws `timeout`; aborting via `AbortSignal` throws `canceled`; when the task enters `input-required` (the Agent asks for more input) or `auth-required` (the Agent demands credentials first), it returns the non-terminal snapshot and the caller resumes via `taskId` / `contextId` (the snapshot carries the server-assigned `contextId` for multi-turn mapping). Pass `verifyCardSignature` on the invoke adaptor to enforce AgentCard JWS signature verification during `probe()`.
+
+### Link resilience
+
+- `invoke()` tolerates transient network faults during polling (fetch failures, connection resets, socket hangs) — a jitter mid-task does not kill the call; without a `timeoutMs` it gives up after a bounded number of consecutive failures so a dead remote does not hang forever.
+- `invokeStreaming()` is the stream-first resilient path (per §4.14): it consumes the SSE event stream and, if the stream ends or drops before a terminal state (server shut the stream / proxy timeout), **falls back to polling `getTask`** to finish the task; non-streaming cards degrade gracefully through the SDK and are finished the same way. Use it for long tasks over unstable links.
+- `invokeStream()` stays a low-level subscriber: when the server closes the stream it ends normally without an exception — check the last event yourself, or use `invokeStreaming` for automatic wrap-up.
 
 ## Layout
 

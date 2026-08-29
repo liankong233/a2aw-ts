@@ -11,7 +11,7 @@
 | 适配器 | 方向 | 职责 |
 | --- | --- | --- |
 | `A2aImplAdaptor` | 外部 → 内部 | 把内部执行能力导出为可被发现与调用的服务端：能力声明 → 对外卡片、执行器 → 任务事件流、认证校验 → 请求主体；`mount()` 挂载 HTTP 服务、`probe()` 本地能力视图 |
-| `A2aInvokeAdaptor` | 内部 → 外部 | 连接外部 Agent：`probe()` 探测能力（→ 统一能力视图）、`invoke()` 调起任务并等到终态、`invokeStream()` 订阅事件流、`getTask()` / `cancel()` 管理任务 |
+| `A2aInvokeAdaptor` | 内部 → 外部 | 连接外部 Agent：`probe()` 探测能力（→ 统一能力视图）、`invoke()` 调起任务并等待终态（或 `input-required` 停泊点，凭 `taskId` 续聊）、`invokeStream()` 订阅事件流、`getTask()` / `cancel()` 管理任务 |
 | `A2aGateway` | 外部 → 内部 | **统一对外网关**：同一份能力实现经可配置的多协议传输同时暴露——A2A（卡片发现 + 任务调用）/ ACP（会话式提示驱动）/ MCP（技能 → 工具），共享执行器与凭据校验器 |
 
 ## 快速开始
@@ -88,7 +88,7 @@ const invoke = new A2aInvokeAdaptor('https://agent.example', {
   auth: bearerTokenProvider(readSecretRefToken), // 凭据来源（可选）
 });
 const view = await invoke.probe();               // 统一能力视图：技能/开关/认证要求/传输绑定
-const task = await invoke.invoke({ message: textMessage('你好') }); // 等到终态
+const task = await invoke.invoke({ message: textMessage('你好') }); // 等到终态或 input-required 停泊点
 console.log(task.state, messageText(task.message));
 ```
 
@@ -104,10 +104,16 @@ console.log(task.state, messageText(task.message));
 
 | 错误 | 场景 | code |
 | --- | --- | --- |
-| `AuthError` | 授权路径（凭据缺失/无效/不可得/需要挑战） | `unauthorized` / `forbidden` / `credentials-unavailable` / `challenge` |
-| `AgentInvokeError` | 调用路径 | `timeout` / `task-failed` / `task-not-found` / `invalid-request` / `unexpected` |
+| `AuthError` | 授权错误分类助手（HTTP 门禁失败以 401 呈现、不抛此类型；宿主自建调用链时可用它归一授权语义） | `unauthorized` / `forbidden` / `credentials-unavailable` / `challenge` |
+| `AgentInvokeError` | 调用路径 | `timeout` / `canceled` / `task-failed` / `task-not-found` / `invalid-request` / `unexpected` |
 
-`invoke()` 在任务终态为 failed / rejected 时抛 `AgentInvokeError('task-failed')` 并携带最终任务快照（`error.task`）；等待终态超时抛 `timeout`。
+`invoke()` 在任务终态为 failed / rejected 时抛 `AgentInvokeError('task-failed')` 并携带最终任务快照（`error.task`）；等待终态超时抛 `timeout`；经 `AbortSignal` 中止抛 `canceled`；任务进入 `input-required`（Agent 请求追加输入）或 `auth-required`（Agent 要求先补凭据）时返回非终态快照，由调用方凭 `taskId` / `contextId` 续聊（快照携带服务端分配的 `contextId`，支撑多轮会话映射）。调用侧配置 `verifyCardSignature` 后，`probe()` 对带 JWS 签名的 AgentCard 强制校验。
+
+### 链路稳健性
+
+- `invoke()` 轮询期间容忍**瞬时网络故障**（fetch failed / ECONNRESET / socket hang up 等）：任务中途链路抖动不判死；未配置 `timeoutMs` 时连续失败超过有界次数后放弃，防对死远端无限轮询。
+- `invokeStreaming()` 是流式优先的韧性路径（§4.14 流式回退）：先消费 SSE 事件流，流终点/中途被服务端掐断仍未达终态时**回退轮询 `getTask`** 收尾；非流式卡片经 SDK 降级后同样收尾。长任务 + 不稳定链路用它。
+- `invokeStream()` 保持低层订阅语义：服务端关闭流时正常结束（无异常），调用方自行判断最后事件是否终态；需要自动收尾用 `invokeStreaming`。
 
 ## 目录
 

@@ -31,6 +31,7 @@
  */
 
 import { DefaultAgentCardResolver, type Client as A2aSDKClient } from '@a2a-js/sdk/client';
+import { verifyAgentCardSignature } from '@a2a-js/sdk';
 import type {
   AgentCard,
   Message,
@@ -46,6 +47,7 @@ import type {
 } from '@a2a-js/sdk';
 import { fromAgentCard, type A2aProbeResult } from './capabilities.ts';
 import { createA2aClient, type A2aClientOptions } from './client.ts';
+import type { AgentCardKeyRetriever } from '../../model/capability.ts';
 
 /** 发送消息的便捷入参（缺省字段在内部补齐，保持调用方简洁）。 */
 export type A2aSendMessageInput = {
@@ -65,6 +67,11 @@ export type A2aSendMessageInput = {
 export type A2aConnectClientOptions = A2aClientOptions & {
   /** AgentCard 路径；缺省 `/.well-known/agent-card.json`。 */
   readonly cardPath?: string;
+  /**
+   * AgentCard 签名（JWS）公钥获取器。配置后探测会强制校验卡片签名
+   * （§4.14：存在时强制校验，失败拒绝连接并提示）。
+   */
+  readonly verifyCardSignature?: AgentCardKeyRetriever;
 };
 
 /** 把便捷入参组装为 SDK 的完整请求对象。 */
@@ -105,22 +112,39 @@ export class A2aConnectClient {
   /**
    * 探测远端：拉取 AgentCard 并解析为统一能力视图。
    *
-   * 走注入的 fetch（含认证头），首次拉取后缓存；失败抛错由调用方处理
-   * （如登记流程里标记「不可连接」）。
+   * 走注入的 fetch（含认证头），首次拉取后缓存；配置了
+   * `verifyCardSignature` 时每次拉取都强制校验签名（失败抛错）。
+   * 失败抛错由调用方处理（如登记流程里标记「不可连接」）。
    */
   async probe(): Promise<A2aProbeResult> {
     const card = await this.getAgentCard();
     return fromAgentCard(card, this.url);
   }
 
-  /** 获取远端 AgentCard（缓存；走注入的 fetch 与认证）。 */
+  /**
+   * 获取远端 AgentCard（缓存；走注入的 fetch 与认证）。
+   *
+   * 配置签名校验后不再短路缓存：每次经 SDK 校验器复核（未签名卡片
+   * 校验器直接放行）。
+   */
   async getAgentCard(): Promise<AgentCard> {
-    if (this.cachedCard !== undefined) {
-      return this.cachedCard;
+    const client = await this.client();
+    if (this.options.verifyCardSignature === undefined) {
+      if (this.cachedCard !== undefined) {
+        return this.cachedCard;
+      }
+      const card = await client.getAgentCard();
+      this.cachedCard = card;
+      return card;
     }
-    const card = await (await this.client()).getAgentCard();
-    this.cachedCard = card;
-    return card;
+    const verifier = verifyAgentCardSignature(async (kid, jku) => {
+      const key = await this.options.verifyCardSignature?.(kid, jku);
+      if (key === null || key === undefined) {
+        throw new Error(`无法取回 AgentCard 签名公钥（kid=${kid}${jku !== undefined ? `, jku=${jku}` : ''}）`);
+      }
+      return key;
+    });
+    return client.getAgentCard(undefined, verifier);
   }
 
   /** 底层 SDK 客户端（惰性创建并缓存；同 probe 共用一条 fetch/auth 链）。 */
@@ -134,37 +158,49 @@ export class A2aConnectClient {
     return this.sdkClient;
   }
 
-  /** 发送消息（阻塞至终态或中间态）。 */
-  async sendMessage(input: A2aSendMessageInput): Promise<SendMessageResult> {
-    return (await this.client()).sendMessage(buildSendMessageRequest(input));
+  /** 发送消息（阻塞至终态或中间态）；`signal` 可终止请求与等待。 */
+  async sendMessage(input: A2aSendMessageInput, signal?: AbortSignal): Promise<SendMessageResult> {
+    return (await this.client()).sendMessage(buildSendMessageRequest(input), signalOptions(signal));
   }
 
   /** 流式发送：产出一串 StreamResponse（task / statusUpdate / artifactUpdate）。 */
   async *sendMessageStream(
     input: A2aSendMessageInput,
+    signal?: AbortSignal,
   ): AsyncGenerator<StreamResponse, void, undefined> {
-    yield* (await this.client()).sendMessageStream(buildSendMessageRequest(input));
+    yield* (await this.client()).sendMessageStream(buildSendMessageRequest(input), signalOptions(signal));
   }
 
   /** 查询任务。 */
-  async getTask(taskId: string): Promise<Task> {
-    return (await this.client()).getTask({ id: taskId, tenant: '' });
+  async getTask(taskId: string, signal?: AbortSignal): Promise<Task> {
+    return (await this.client()).getTask({ id: taskId, tenant: '' }, signalOptions(signal));
   }
 
   /** 取消任务（幂等）。 */
-  async cancelTask(taskId: string): Promise<Task> {
-    return (await this.client()).cancelTask({ id: taskId, tenant: '', metadata: undefined });
+  async cancelTask(taskId: string, signal?: AbortSignal): Promise<Task> {
+    return (await this.client()).cancelTask(
+      { id: taskId, tenant: '', metadata: undefined },
+      signalOptions(signal),
+    );
   }
 
   /** 订阅既有任务的事件流。 */
-  async *resubscribeTask(taskId: string): AsyncGenerator<StreamResponse, void, undefined> {
-    yield* (await this.client()).resubscribeTask({ id: taskId, tenant: '' });
+  async *resubscribeTask(
+    taskId: string,
+    signal?: AbortSignal,
+  ): AsyncGenerator<StreamResponse, void, undefined> {
+    yield* (await this.client()).resubscribeTask({ id: taskId, tenant: '' }, signalOptions(signal));
   }
 
   /** 底层 SDK 客户端（需要完整方法集时透明访问）。 */
   async sdk(): Promise<A2aSDKClient> {
     return this.client();
   }
+}
+
+/** SDK 请求选项包装：signal 缺省时不传（保持与 SDK 缺省一致）。 */
+function signalOptions(signal: AbortSignal | undefined) {
+  return signal !== undefined ? { signal } : undefined;
 }
 
 export type {

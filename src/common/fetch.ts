@@ -34,6 +34,10 @@ export const defaultFetch: FetchLike = globalThis.fetch;
 /**
  * 包装 fetch：为每个请求附加认证头，然后委托给底层实现。
  *
+ * 传入 `Request` 对象且未提供 `init.headers` 时，以该 Request 的原始头
+ * 为底合并（fetch 规范里 `init.headers` 会整体替换 Request 自带头，不能
+ * 用来承载认证头之外的既有请求头）。
+ *
  * @param fetchImpl - 底层 fetch（可以继续被其他中间件包装，形成注入链）。
  * @param auth - 认证头来源；每次请求动态求值，保证 token 刷新后立即生效。
  */
@@ -42,7 +46,13 @@ export function withAuthHeaders(
   auth: AuthHeaderProvider | AuthHeaders,
 ): FetchLike {
   return async (input, init) => {
-    const headers = new Headers(init?.headers);
+    // init.headers 缺省且 input 是 Request：以 Request 自带头为底，避免
+    // 整体替换把原始头（content-type 等）冲掉
+    const base =
+      init?.headers !== undefined || !(input instanceof Request)
+        ? init?.headers
+        : input.headers;
+    const headers = new Headers(base);
     for (const [name, value] of Object.entries(await resolveAuthHeaders(auth))) {
       headers.set(name, value);
     }
