@@ -3,7 +3,9 @@ name: Publish to npm
 on:
   push:
     tags:
+      # 兼容 v0.2.0（npm version 默认 v 前缀）与 0.2.0（无前缀 tag）
       - 'v*'
+      - '[0-9]*'
   workflow_dispatch:
 
 permissions:
