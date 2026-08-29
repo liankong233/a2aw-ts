@@ -1,0 +1,45 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # GitHub OIDC：供 npm publish --provenance 换取 SLSA 签名（包来源可验证）
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # setup-node 据此生成 ~/.npmrc（registry 指向 + 认证凭据注入）
+          registry-url: https://registry.npmjs.org/
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 包内 prepublishOnly 已含 typecheck + test + build（npm publish 前强制跑）；
+      # 这里显式先跑一遍，让门禁失败在「发布」步骤之前就清晰可见
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build (dist)
+        run: npm run build
+
+      - name: Publish to npm (SLSA provenance via GitHub OIDC)
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
