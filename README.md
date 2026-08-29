@@ -6,6 +6,29 @@ Protocol-agnostic Agent capability adaptation library: **`A2aImplAdaptor` (imple
 
 **[中文文档 (Chinese docs)](./README-zh.md)**
 
+## Install
+
+```bash
+npm install @codepre/a2aw-ts
+# server-side adaptors additionally require Express (see note below)
+npm install express
+```
+
+**Requirements**: Node.js ≥ 20 and an ESM project (`"type": "module"`); TypeScript types ship in the package (`dist/index.d.ts`), no separate `@types` package.
+
+**Express note**: the implementation-side adaptors (`A2aImplAdaptor`, `A2aGateway`) mount HTTP handlers on an Express application, so Express is required to serve them. The package currently exposes a single entry point that loads the server-side bindings, so plain client-side usage (`A2aInvokeAdaptor`, `A2aInvokeAdaptor.invoke`, …) also needs Express installed at runtime — install it alongside unless you mount the handlers on another host via `@fastify/express` yourself.
+
+Quick start:
+
+```ts
+import { A2aInvokeAdaptor, textMessage, messageText } from '@codepre/a2aw-ts';
+
+const invoke = new A2aInvokeAdaptor('https://agent.example');
+const view = await invoke.probe();                       // unified capability view
+const task = await invoke.invoke({ message: textMessage('hello') });
+console.log(task.state, messageText(task.message));
+```
+
 ## The three adaptors
 
 | Adaptor | Direction | Responsibility |
